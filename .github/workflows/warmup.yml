@@ -2,8 +2,8 @@ name: Claude Code Warmup
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # 06:00 Polish time (CEST, summer)
-    - cron: '0 5 * * *'   # 06:00 Polish time (CET, winter)
+    - cron: '30 5 * * *'  # 07:30 Polish time (CEST, summer)
+    - cron: '30 6 * * *'  # 07:30 Polish time (CET, winter)
   workflow_dispatch: {}
 
 concurrency:
