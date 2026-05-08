@@ -1,0 +1,58 @@
+name: Claude Code Warmup (acc2)
+
+on:
+  schedule:
+    - cron: '30 3 * * *'  # 05:30 Polish time (CEST, summer)
+    - cron: '30 4 * * *'  # 05:30 Polish time (CET, winter)
+  workflow_dispatch: {}
+
+concurrency:
+  group: claude-warmup-acc2
+  cancel-in-progress: false
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Validate configuration
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_2 }}
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "CLAUDE_OAUTH_TOKEN_2 secret is not set."
+            exit 1
+          fi
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Ping Claude to anchor 5-hour window
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_2 }}
+        run: |
+          mkdir -p ~/.claude
+          echo '{"hasCompletedOnboarding":true}' > ~/.claude.json
+          output_file="$(mktemp)"
+          set +e
+          claude -p "hi" --model haiku --no-session-persistence >"$output_file" 2>&1
+          status=$?
+          set -e
+          cat "$output_file"
+
+          if [ $status -eq 0 ]; then
+            echo "✓ acc2 warmup complete"
+            exit 0
+          fi
+
+          if grep -Eiq "expired|unauthorized|invalid token|authentication|auth failed|login required|not logged in" "$output_file"; then
+            echo "Token invalid/expired. Refresh: HOME=\$HOME/claude-acc2 claude setup-token + gh secret set CLAUDE_OAUTH_TOKEN_2"
+            exit 1
+          fi
+
+          if grep -qi "rate limit" "$output_file"; then
+            echo "Rate limit; treating as success."
+            exit 0
+          fi
+
+          exit $status
