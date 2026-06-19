@@ -1,0 +1,60 @@
+name: Claude Code Warmup (acc4)
+
+on:
+  schedule:
+    # Single odd-minute cron. GitHub fires scheduled jobs hours late under
+    # load (':30' and round hours are the worst), so this is "no earlier than",
+    # not exact. Scheduled early to drag the real run toward the morning.
+    - cron: '17 4 * * *'  # 04:17 UTC; real start observed ~3-5h later
+  workflow_dispatch: {}
+
+concurrency:
+  group: claude-warmup-acc4
+  cancel-in-progress: false
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Validate configuration
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_4 }}
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "CLAUDE_OAUTH_TOKEN_4 secret is not set."
+            exit 1
+          fi
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Ping Claude to anchor 5-hour window
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_4 }}
+        run: |
+          mkdir -p ~/.claude
+          echo '{"hasCompletedOnboarding":true}' > ~/.claude.json
+          output_file="$(mktemp)"
+          set +e
+          claude -p "hi" --model haiku --no-session-persistence >"$output_file" 2>&1
+          status=$?
+          set -e
+          cat "$output_file"
+
+          if [ $status -eq 0 ]; then
+            echo "✓ acc4 warmup complete"
+            exit 0
+          fi
+
+          if grep -Eiq "expired|unauthorized|invalid token|authentication|auth failed|login required|not logged in" "$output_file"; then
+            echo "Token invalid/expired. Refresh: HOME=\$HOME/claude-acc4 claude setup-token + gh secret set CLAUDE_OAUTH_TOKEN_4"
+            exit 1
+          fi
+
+          if grep -Eiq "rate limit|session limit|usage limit" "$output_file"; then
+            echo "Rate/session limit; token works, treating as success."
+            exit 0
+          fi
+
+          exit $status
