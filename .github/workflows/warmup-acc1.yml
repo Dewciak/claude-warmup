@@ -2,8 +2,10 @@ name: Claude Code Warmup (acc1)
 
 on:
   schedule:
-    - cron: '30 5 * * *'  # 07:30 Polish time (CEST, summer)
-    - cron: '30 6 * * *'  # 07:30 Polish time (CET, winter)
+    # Single odd-minute cron. GitHub fires scheduled jobs hours late under
+    # load (':30' and round hours are the worst), so this is "no earlier than",
+    # not exact. Scheduled early to drag the real run toward the morning.
+    - cron: '7 4 * * *'  # 04:07 UTC; real start observed ~3-5h later
   workflow_dispatch: {}
 
 concurrency:
@@ -50,8 +52,8 @@ jobs:
             exit 1
           fi
 
-          if grep -qi "rate limit" "$output_file"; then
-            echo "Rate limit; treating as success."
+          if grep -Eiq "rate limit|session limit|usage limit" "$output_file"; then
+            echo "Rate/session limit; token works, treating as success."
             exit 0
           fi
 
