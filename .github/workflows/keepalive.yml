@@ -1,0 +1,54 @@
+name: Keepalive (stop GitHub disabling the schedules)
+
+# GitHub disables scheduled workflows in a repository after 60 days without
+# activity. That is exactly what happened here: last commit 2026-06-29, all
+# three warmup schedules went dark on 2026-08-28 and nothing ran afterwards.
+# This job touches the repo every week and re-enables anything already
+# disabled, so the 60-day counter never gets close again.
+
+on:
+  schedule:
+    - cron: '13 5 * * 1'   # Mondays, ~05:13 UTC (queue delay is irrelevant here)
+  workflow_dispatch: {}
+
+concurrency:
+  group: claude-warmup-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Touch heartbeat file
+        run: |
+          mkdir -p .github
+          date -u +%FT%TZ > .github/last-keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-keepalive
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore: keepalive heartbeat"
+            git push
+          fi
+
+      - name: Re-enable warmup schedules if GitHub disabled them
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for wf in warmup-acc1.yml warmup-acc2.yml warmup-acc3.yml; do
+            state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}" --jq .state)"
+            echo "${wf}: ${state}"
+            if [ "$state" != "active" ]; then
+              gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/enable"
+              echo "${wf}: re-enabled"
+            fi
+          done

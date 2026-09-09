@@ -2,22 +2,74 @@ name: Claude Code Warmup (acc3)
 
 on:
   schedule:
-    # Single odd-minute cron. GitHub fires scheduled jobs hours late under
-    # load (':30' and round hours are the worst), so this is "no earlier than",
-    # not exact. Scheduled early to drag the real run toward the morning.
-    - cron: '17 2 * * *'  # 02:17 UTC; real start observed ~3-5h later
+    # GitHub queues scheduled jobs and runs them when a shared runner frees up:
+    # typically 40-60 min late, occasionally 10+ hours late. A single cron is
+    # therefore "no earlier than", never "at". So we fire many ticks across a
+    # wide UTC span and let the guard below decide which one actually pings.
+    # Ticks land at Warsaw 05:40-06:25 on a normal day; a badly
+    # delayed day is skipped on purpose rather than anchoring the 5h window
+    # in the middle of the afternoon.
+    - cron: '8,28,48 2-5 * * *'
   workflow_dispatch: {}
 
 concurrency:
   group: claude-warmup-acc3
   cancel-in-progress: false
 
+env:
+  WINDOW_START: '0540'   # Europe/Warsaw, HHMM
+  WINDOW_END: '0625'     # Europe/Warsaw, HHMM
+
 jobs:
   warmup:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
+      - name: Check target window (Europe/Warsaw)
+        id: window
+        run: |
+          now="$(TZ=Europe/Warsaw date +%H%M)"
+          day="$(TZ=Europe/Warsaw date +%Y-%m-%d)"
+          echo "Warsaw now: $(TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M %Z') | target ${WINDOW_START}-${WINDOW_END}"
+          echo "day=$day" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch: window and daily lock bypassed."
+            echo "in_window=true" >> "$GITHUB_OUTPUT"
+            echo "forced=true" >> "$GITHUB_OUTPUT"
+          elif (( 10#$now >= 10#$WINDOW_START && 10#$now <= 10#$WINDOW_END )); then
+            echo "In window."
+            echo "in_window=true" >> "$GITHUB_OUTPUT"
+            echo "forced=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Outside window: this tick was queued too early or too late. Skipping."
+            echo "in_window=false" >> "$GITHUB_OUTPUT"
+            echo "forced=false" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Check daily lock
+        id: lock
+        if: steps.window.outputs.in_window == 'true' && steps.window.outputs.forced != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .warmup-lock
+          key: warmup-acc3-${{ steps.window.outputs.day }}
+
+      - name: Decide
+        id: go
+        run: |
+          if [ "${{ steps.window.outputs.in_window }}" != "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.lock.outputs.cache-hit }}" = "true" ]; then
+            echo "Already warmed up today; skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
       - name: Validate configuration
+        if: steps.go.outputs.run == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_3 }}
         run: |
@@ -27,9 +79,12 @@ jobs:
           fi
 
       - name: Install Claude Code
+        if: steps.go.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Ping Claude to anchor 5-hour window
+        id: ping
+        if: steps.go.outputs.run == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_OAUTH_TOKEN_3 }}
         run: |
@@ -43,12 +98,12 @@ jobs:
           cat "$output_file"
 
           if [ $status -eq 0 ]; then
-            echo "✓ acc3 warmup complete"
+            echo "OK: acc3 warmup complete at $(TZ=Europe/Warsaw date '+%H:%M %Z')"
             exit 0
           fi
 
           if grep -Eiq "expired|unauthorized|invalid token|authentication|auth failed|login required|not logged in" "$output_file"; then
-            echo "Token invalid/expired. Refresh: HOME=\$HOME/claude-acc3 claude setup-token + gh secret set CLAUDE_OAUTH_TOKEN_3"
+            echo "Token invalid/expired. Refresh: HOME=$HOME/claude-acc3 claude setup-token + gh secret set CLAUDE_OAUTH_TOKEN_3"
             exit 1
           fi
 
@@ -58,3 +113,15 @@ jobs:
           fi
 
           exit $status
+
+      - name: Arm daily lock
+        if: steps.ping.outcome == 'success' && steps.window.outputs.forced != 'true'
+        run: date -u +%FT%TZ > .warmup-lock
+
+      - name: Save daily lock
+        if: steps.ping.outcome == 'success' && steps.window.outputs.forced != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .warmup-lock
+          key: warmup-acc3-${{ steps.window.outputs.day }}
