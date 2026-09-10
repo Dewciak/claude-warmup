@@ -18,7 +18,7 @@ concurrency:
 
 env:
   WINDOW_START: '0540'   # Europe/Warsaw, HHMM
-  WINDOW_END: '0625'     # Europe/Warsaw, HHMM
+  WINDOW_END: '1000'     # Europe/Warsaw, HHMM
 
 jobs:
   warmup:
