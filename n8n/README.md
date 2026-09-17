@@ -60,3 +60,15 @@ go nie naprawi. Limit uzycia liczy sie jako sukces: token dziala, okno dotkniete
 ## Reczne sprawdzenie
 
     ssh specodit@87.106.130.91 '/home/specodit/bin/claude-warmup acc1; echo exit=$?'
+
+## n8n 2.x blokuje Execute Command
+
+Od wersji 2.0 n8n wylacza domyslnie dwa wezly: Execute Command i wyzwalacz
+plikowy. W edytorze objawia sie to komunikatem "Install this node to use it",
+mimo ze wezel jest zainstalowany. Odblokowanie samego Execute Command:
+
+    sudo install -m 644 /home/specodit/nodes-exclude.conf /etc/systemd/system/n8n.service.d/nodes-exclude.conf
+    sudo systemctl daemon-reload && sudo systemctl restart n8n
+
+Plik `nodes-exclude.conf` (kopia w tym katalogu) zostawia wyzwalacz plikowy
+nadal wylaczony - odblokowuje wylacznie to, czego potrzebuje warmup.
