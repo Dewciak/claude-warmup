@@ -22,6 +22,16 @@ LOG_DIR="$ROOT/logs"
 LOG="$LOG_DIR/$ACC.log"
 CLAUDE_BIN="/home/specodit/.npm-global/bin/claude"
 MAIL_TO="wiktor@specodit.pl"
+# Kto jest kim: numeracja warmupow nie pokrywa sie z numeracja katalogow
+# konfiguracyjnych na Macu (historia zakladania profili). Zrodlo prawdy:
+# ~/.claude-accounts/config.json na Macu.
+case "$ACC" in
+  acc1) OWNER="wiktor@specodit.pl";            CFG_DIR="/Users/specodit/.claude-acc2" ;;
+  acc2) OWNER="g.handzlik@specodit.pl";        CFG_DIR="/Users/specodit/.claude-acc4" ;;
+  acc3) OWNER="joanna@specodit.pl";            CFG_DIR="/Users/specodit/.claude-acc3" ;;
+  *)    OWNER="(konto nieznane)";              CFG_DIR="/Users/specodit/.claude-<?>" ;;
+esac
+
 ATTEMPTS=3
 BACKOFF=60
 PING_TIMEOUT=180
@@ -66,7 +76,8 @@ fail() {
   local reason="$1" detail="${2:-}"
   log "PAD: $reason"
   send_mail "Claude warmup PADL: $ACC ($(TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M'))" \
-"Konto:    $ACC
+"Warmup:   $ACC
+Konto:    $OWNER
 Czas:     $(stamp)
 Maszyna:  $(hostname) (n8n)
 Powod:    $reason
@@ -76,8 +87,10 @@ $detail
 ----------------------------------------------------------
 
 Odswiezenie tokenu:
-  na Macu:  HOME=~/claude-$ACC claude setup-token
-  na VPS:   wklej nowy token do $TOKEN_FILE (chmod 600)
+  1. na Macu, w oknie przegladarki zalogowanym jako $OWNER:
+       CLAUDE_CONFIG_DIR=$CFG_DIR claude setup-token
+  2. wklej wynik na VPS:
+       ssh specodit@87.106.130.91 'umask 077; cat > $TOKEN_FILE'
 
 Pelny log: $LOG"
   exit 1
@@ -97,7 +110,7 @@ trap 'rm -f "$out_file"' EXIT
 status=1
 
 for i in $(seq 1 "$ATTEMPTS"); do
-  log "proba $i/$ATTEMPTS - ping konta $ACC"
+  log "proba $i/$ATTEMPTS - ping $ACC ($OWNER)"
   HOME="$HOME_DIR" CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" \
     timeout "$PING_TIMEOUT" "$CLAUDE_BIN" -p "hi" --model haiku --no-session-persistence \
     >"$out_file" 2>&1
@@ -105,7 +118,7 @@ for i in $(seq 1 "$ATTEMPTS"); do
   head -c 2000 "$out_file" >> "$LOG"; echo >> "$LOG"
 
   if [ $status -eq 0 ]; then
-    log "OK: $ACC rozgrzane"
+    log "OK: $ACC ($OWNER) rozgrzane"
     exit 0
   fi
 
