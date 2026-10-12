@@ -1,16 +1,27 @@
-# Warmup bez GitHuba - n8n + lokalne CLI
+# Warmup bez GitHuba i bez n8n - cron na VPS
 
-Ping rozgrzewajacy 5-godzinne okno robi teraz samo n8n na `87.106.130.91`
-(usluga systemd, user `specodit`). GitHub Actions nie bierze w tym udzialu:
-znika kolejka runnerow, bramka czasowa, dzienna blokada na cache i keepalive.
+Ping rozgrzewajacy 5-godzinne okno robi cron uzytkownika `specodit` na
+`87.106.130.91`. Ani GitHub Actions, ani n8n nie biora w tym udzialu.
+
+Dlaczego nie n8n: od wersji 2.0 wylacza ono domyslnie wezel uruchamiajacy
+polecenia systemowe, a jego odblokowanie dawaloby kazdemu, kto wejdzie do
+panelu, prawo wykonywania polecen na maszynie, na ktorej stoja tez CRM
+VetFactory i panel isp4trucks. Cron nie wymaga ani tego ustepstwa, ani
+uprawnien administratora.
+
+Dlaczego kazde konto ma DWA wpisy w cronie: serwer chodzi w UTC, a tutejszy
+cron nie zna ustawienia strefy (Ubuntu 22.04 nie ma CRON_TZ). Wolania sa wiec
+dwa - o godzinie zimowej i letniej - a skrypt wybiera to wlasciwe, porownujac
+czas warszawski z godzina docelowa konta. Dzienna blokada pilnuje, zeby drugie
+wolanie nie pingowalo po raz drugi.
 
 ## Ktore konto to ktory warmup
 
 | warmup | konto              | katalog konfiguracji na Macu | godzina |
 |--------|--------------------|------------------------------|---------|
 | acc1   | wiktor@specodit.pl | `~/.claude-acc2`             | 06:30   |
-| acc2   | g.handzlik@specodit.pl (Gabrysia) | `~/.claude-acc4` | 08:30   |
-| acc3   | joanna@specodit.pl | `~/.claude-acc3`             | 08:00   |
+| acc2   | g.handzlik@specodit.pl (Gabrysia) | `~/.claude-acc4` | 06:30   |
+| acc3   | joanna@specodit.pl | `~/.claude-acc3`             | 06:30   |
 
 Numeracja katalogow na Macu jest przesunieta wzgledem numeracji warmupow -
 to nie pomylka, tylko historia zakladania profili. Zrodlem prawdy o tym,
@@ -59,7 +70,14 @@ go nie naprawi. Limit uzycia liczy sie jako sukces: token dziala, okno dotkniete
 
 ## Reczne sprawdzenie
 
-    ssh specodit@87.106.130.91 '/home/specodit/bin/claude-warmup acc1; echo exit=$?'
+    ssh specodit@87.106.130.91 '/home/specodit/bin/claude-warmup acc1 --now; echo exit=$?'
+
+Bez `--now` skrypt o innej porze dnia grzecznie wyjdzie, nie pingujac.
+
+## Stary sposob (n8n)
+
+Historycznie mial to odpalac przeplyw w n8n przez wezel Execute Command.
+Zostal porzucony - powody wyzej.
 
 ## n8n 2.x blokuje Execute Command
 

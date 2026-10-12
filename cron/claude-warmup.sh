@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Poranny ping jednego konta Claude Code - kotwiczy 5-godzinne okno rozliczeniowe.
-# Uruchamiany przez n8n (wezel Execute Command) na tej samej maszynie co n8n.
-# Uzycie: claude-warmup <acc1|acc2|acc3|acc4>
+# Uruchamiany przez crona uzytkownika specodit na tej samej maszynie.
+# Uzycie: claude-warmup <acc1|acc2|acc3> [--now]
 #
-# Zero GitHuba: godzine wyznacza cron n8n, wiec nie ma tu bramki czasowej
-# ani dziennej blokady - te istnialy tylko po to, by ujarzmic kolejke runnerow.
+# DLACZEGO BRAMKA CZASU: serwer chodzi w UTC, a tutejszy cron nie zna ustawienia
+# strefy (wersja Ubuntu nie ma CRON_TZ). Zeby godzina warszawska nie skakala przy
+# zmianie czasu, cron wola kazde konto DWA razy - o godzinie zimowej i letniej -
+# a skrypt sam decyduje, ktore wolanie jest tym wlasciwym. Dzienna blokada
+# pilnuje, zeby drugie wolanie nie pingowalo po raz drugi.
+#
+# --now pomija bramke i blokade (reczne sprawdzenie).
 
 set -uo pipefail
 
 ACC="${1:-}"
+FORCE="${2:-}"
 if [ -z "$ACC" ]; then
-  echo "uzycie: claude-warmup <acc1|acc2|acc3|acc4>" >&2
+  echo "uzycie: claude-warmup <acc1|acc2|acc3> [--now]" >&2
   exit 2
 fi
 
@@ -26,17 +32,20 @@ MAIL_TO="wiktor@specodit.pl"
 # konfiguracyjnych na Macu (historia zakladania profili). Zrodlo prawdy:
 # ~/.claude-accounts/config.json na Macu.
 case "$ACC" in
-  acc1) OWNER="wiktor@specodit.pl";            CFG_DIR="/Users/specodit/.claude-acc2" ;;
-  acc2) OWNER="g.handzlik@specodit.pl";        CFG_DIR="/Users/specodit/.claude-acc4" ;;
-  acc3) OWNER="joanna@specodit.pl";            CFG_DIR="/Users/specodit/.claude-acc3" ;;
-  *)    OWNER="(konto nieznane)";              CFG_DIR="/Users/specodit/.claude-<?>" ;;
+  acc1) OWNER="wiktor@specodit.pl";     CFG_DIR="/Users/specodit/.claude-acc2"; TARGET="0630" ;;
+  acc2) OWNER="g.handzlik@specodit.pl"; CFG_DIR="/Users/specodit/.claude-acc4"; TARGET="0630" ;;
+  acc3) OWNER="joanna@specodit.pl";     CFG_DIR="/Users/specodit/.claude-acc3"; TARGET="0630" ;;
+  *)    echo "nieznane konto: $ACC" >&2; exit 2 ;;
 esac
+GRACE_MIN=70   # ile minut po docelowej godzinie wolanie jest jeszcze "to wlasciwe"
 
 ATTEMPTS=3
 BACKOFF=60
 PING_TIMEOUT=180
 
-mkdir -p "$HOME_DIR" "$LOG_DIR" "$ROOT/tokens"
+LOCK="$ROOT/locks/$ACC-$(TZ=Europe/Warsaw date +%F)"
+mkdir -p "$HOME_DIR" "$LOG_DIR" "$ROOT/tokens" "$ROOT/locks"
+find "$ROOT/locks" -type f -mtime +7 -delete 2>/dev/null
 
 stamp() { TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(stamp)] $*" | tee -a "$LOG"; }
@@ -96,6 +105,20 @@ Pelny log: $LOG"
   exit 1
 }
 
+# --- ktore wolanie jest tym wlasciwym ------------------------------------
+if [ "$FORCE" != "--now" ]; then
+  now_min=$(( 10#$(TZ=Europe/Warsaw date +%H) * 60 + 10#$(TZ=Europe/Warsaw date +%M) ))
+  tgt_min=$(( 10#${TARGET:0:2} * 60 + 10#${TARGET:2:2} ))
+  if [ "$now_min" -lt "$tgt_min" ] || [ "$now_min" -gt $(( tgt_min + GRACE_MIN )) ]; then
+    echo "[$(stamp)] pomijam: warszawski $(TZ=Europe/Warsaw date +%H:%M) poza oknem ${TARGET:0:2}:${TARGET:2:2} +${GRACE_MIN}min" >> "$LOG"
+    exit 0
+  fi
+  if [ -e "$LOCK" ]; then
+    echo "[$(stamp)] pomijam: $ACC juz rozgrzane dzisiaj" >> "$LOG"
+    exit 0
+  fi
+fi
+
 # --- token ---------------------------------------------------------------
 [ -s "$TOKEN_FILE" ] || fail "brak tokenu w $TOKEN_FILE" "Plik nie istnieje albo jest pusty."
 TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
@@ -119,12 +142,14 @@ for i in $(seq 1 "$ATTEMPTS"); do
 
   if [ $status -eq 0 ]; then
     log "OK: $ACC ($OWNER) rozgrzane"
+    [ "$FORCE" = "--now" ] || : > "$LOCK"
     exit 0
   fi
 
   # Limit uzycia oznacza, ze token dziala, a okno i tak zostalo dotkniete.
   if grep -Eiq "rate limit|session limit|usage limit" "$out_file"; then
     log "OK: limit uzycia - token dziala, traktuje jako sukces"
+    [ "$FORCE" = "--now" ] || : > "$LOCK"
     exit 0
   fi
 

@@ -1,0 +1,10 @@
+# Claude Code warmup - poranny ping kotwiczacy 5-godzinne okno.
+# Serwer chodzi w UTC, a tutejszy cron nie zna CRON_TZ, wiec kazde konto jest
+# wolane dwa razy: o godzinie zimowej i letniej. Skrypt sam wybiera to wlasciwe
+# wolanie (bramka na czas warszawski + dzienna blokada).
+30 4 * * * /home/specodit/bin/claude-warmup acc1 >/dev/null 2>&1
+30 5 * * * /home/specodit/bin/claude-warmup acc1 >/dev/null 2>&1
+30 4 * * * /home/specodit/bin/claude-warmup acc2 >/dev/null 2>&1
+30 5 * * * /home/specodit/bin/claude-warmup acc2 >/dev/null 2>&1
+30 4 * * * /home/specodit/bin/claude-warmup acc3 >/dev/null 2>&1
+30 5 * * * /home/specodit/bin/claude-warmup acc3 >/dev/null 2>&1
